@@ -1,42 +1,17 @@
 namespace QuestLog;
 
 using System.Collections.ObjectModel;
-// =============================================================================
-// TODO 1
-//
 
-////
-// Without it you get "The type or namespace name 'ObservableCollection' could
-// not be found". Everybody hits this one. It is the easiest thing on the page
-// to fix and the easiest thing to forget.
-// =============================================================================
 
 
 
 
 public partial class MainPage : ContentPage
 {
-    public ObservableCollection<string> Quests { get; } = new ObservableCollection<string>();
-    // -------------------------------------------------------------------------
-    // TODO 2
-    //
-    // Right now this is a plain List. A plain List cannot tell anybody it
-    // changed -- which is why there is a Refresh() method further down doing
-    // the ItemsSource dance by hand.
-    //
-    // Replace the line below with a PROPERTY holding an ObservableCollection:
-    //
-    // Three things worth noticing:
-    //   * It is a PROPERTY (capital), not a variable. Binding can only see
-    //     properties -- that is what last Thursday was about.
-    //   * get only, no set. The collection is created once, right here.
-    //   * = new() creates it. Never assign a new one later, or the screen stops
-    //     watching the one it was given.
-    //
-    // You will also need to change every "quests" below to "Quests".
-    // -------------------------------------------------------------------------
+    public ObservableCollection<Quest> Quests { get; } = new ObservableCollection<Quest>();
 
-    // The quests the button hands out, in order. Nothing to change here.
+    private string path = Path.Combine(FileSystem.AppDataDirectory, "quests.json");
+
     string[] pool =
     {
         "Clear the cellar rats",
@@ -53,61 +28,102 @@ public partial class MainPage : ContentPage
     {
         InitializeComponent();
         BindingContext = this;
-        Quests.Add("Speak to the innkeeper");
-        Quests.Add("Buy a lantern");
+        Quests.Add(new Quest { Title = "Speak to the innkeeper", Giver = "Townsperson", Reward = 10 });
+        Quests.Add(new Quest { Title = "Buy a lantern", Giver = "Merchant", Reward = 25 });
 
+        Load();
 
-        // ---------------------------------------------------------------------
-        // TODO 3
-        //
-        // Add this line, below InitializeComponent():
-        //
-        //
-        // It means "when the XAML says {Binding something}, look for it on THIS
-        // page object." Leave it out and every binding on the page quietly
-        // finds nothing -- no error, just an empty list.
-        // ---------------------------------------------------------------------
 
     }
 
-    private void OnAddClicked(object sender, EventArgs e)
+    private async void OnAddClicked(object sender, EventArgs e)
     {
-        Quests.Add(pool[next]);
+        // Check if the Title or Giver fields were left empty
+        if (string.IsNullOrWhiteSpace(TitleEntry.Text) || string.IsNullOrWhiteSpace(GiverEntry.Text))
+        {
+            await DisplayAlertAsync("Error", "Please fill out both the Title and Giver fields.", "OK");
+            return;
+        }
 
-        next++;
-        if (next >= pool.Length)
-            next = 0;
+        // Safely convert the reward text into a whole number
+        if (!int.TryParse(RewardEntry.Text, out int rewardAmount) || rewardAmount < 0)
+        {
+            await DisplayAlertAsync("Error", "Please enter a valid, positive number for the reward.", "OK");
+            return;
+        }
 
+        // Add the new structured quest object to your collection
+        Quests.Add(new Quest
+        {
+            Title = TitleEntry.Text,
+            Giver = GiverEntry.Text,
+            Reward = rewardAmount
+        });
+
+        // Clear the input text boxes so they are ready for the next entry
+        TitleEntry.Text = string.Empty;
+        GiverEntry.Text = string.Empty;
+        RewardEntry.Text = string.Empty;
+
+        // Update the total quest count tracker label on the screen
         CountLabel.Text = $"{Quests.Count} quests";
 
-        // ---------------------------------------------------------------------
-        // TODO 5  (do this one LAST, after 1-4 are working)
-        //
-        // Delete the Refresh() call below. Then delete the Refresh() method
-        // entirely. The list should still update when you press the button --
-        // that is the whole point of today.
-        //
-        // One line does NOT come for free: the count label. A collection
-        // announces its own changes; a Label does not. So update the CountLabel text over here
-        //
-        // Binding is not magic glue that updates everything on the page. It
-        // updates what you bound. The label is still your job.
-        // ---------------------------------------------------------------------
+
 
     }
 
-    private void OnTurnInQuestClicked(object sender, EventArgs e)
+    private async void OnTurnInQuestClicked(object sender, EventArgs e)
     {
-        Quests.Remove(Quests[Quests.Count - 1]);
-        CountLabel.Text = $"{Quests.Count} quests";
+        // Grab the currently selected quest object from your UI using the correct name: QuestView
+        var selectedQuest = QuestView.SelectedItem as Quest;
+
+        // Validate that an item is actually highlighted
+        if (selectedQuest == null)
+        {
+            await DisplayAlertAsync("Notice", "Please select a quest from the list to turn in.", "OK");
+            return;
+        }
+
+        // Delete the chosen quest from your tracking collection
+        Quests.Remove(selectedQuest);
+
+        // Reset the UI selection so nothing remains highlighted accidentally
+        QuestView.SelectedItem = null;
+
+        // Trigger your JSON backend manager to sync changes directly onto the local drive
+        Save();
     }
 
-    // -------------------------------------------------------------------------
-    // This whole method exists only because a plain List cannot announce
-    // changes. Setting ItemsSource to null and then back is how you force a
-    // CollectionView to look again.
-    //
-    // By the end of the lab this method should not exist.
-    // -------------------------------------------------------------------------
+    // Converts your tracking collection into plain text and commits it to disk
+    private void Save()
+    {
+        // Serialize your Quests list into a structured JSON string
+        string json = System.Text.Json.JsonSerializer.Serialize(Quests);
+
+        // Write that text block directly into your system path file
+        File.WriteAllText(path, json);
+    }
+
+    // Reads the text back from storage to reconstruct your collection on launch
+    private void Load()
+    {
+        // Safety check: Make sure a saved file exists so the application doesn't crash on absolute first boot
+        if (!File.Exists(path)) return;
+
+        // Pull the entire JSON string out of the text file
+        string json = File.ReadAllText(path);
+
+        // Turn the raw text back into a list of Quest objects
+        var savedQuests = System.Text.Json.JsonSerializer.Deserialize<List<Quest>>(json);
+
+        if (savedQuests != null)
+        {
+            // Add them to your live observable collection one by one to avoid breaking data bindings
+            foreach (var q in savedQuests)
+            {
+                Quests.Add(q);
+            }
+        }
+    }
 
 }
